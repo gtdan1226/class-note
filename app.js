@@ -496,7 +496,7 @@ function renderTuitionNotice(currentUser, student) {
       <div class="surface-body">
         ${unpaidCycles.length
           ? `<div class="tuition-list">${unpaidCycles.map(cycle => renderTuitionCycleAlert(cycle, currentUser)).join("")}</div>`
-          : `<div class="tuition-clear"><strong>현재 납부 알림이 없습니다.</strong><span>${recentPaidCycle ? `${formatTuitionCycleLabel(recentPaidCycle)} 납부 확인 완료` : `${summary.nextCycleStart}-${summary.nextCycleEnd}회차가 채워지면 알림이 표시됩니다.`}</span>${currentUser.role === "teacher" && recentPaidCycle ? `<button class="button" type="button" data-action="mark-tuition-unpaid" data-student-id="${student.id}" data-cycle-no="${recentPaidCycle.cycleNo}">납부 확인 취소</button>` : ""}</div>`
+          : `<div class="tuition-clear"><strong>현재 납부 알림이 없습니다.</strong><span>${recentPaidCycle ? `${formatTuitionCycleLabel(recentPaidCycle)} 납부 확인 완료` : "첫 수업이 시작되면 알림이 표시됩니다."}</span>${currentUser.role === "teacher" && recentPaidCycle ? `<button class="button" type="button" data-action="mark-tuition-unpaid" data-student-id="${student.id}" data-cycle-no="${recentPaidCycle.cycleNo}">납부 확인 취소</button>` : ""}</div>`
         }
       </div>
     </section>
@@ -504,12 +504,12 @@ function renderTuitionNotice(currentUser, student) {
 }
 
 function renderTuitionCycleAlert(cycle, currentUser) {
-  const message = currentUser.role === "teacher" ? "보호자에게 납부 안내가 필요한 회차입니다." : "4회차 단위 수업이 완료되어 수업료 납부 안내가 필요한 상태입니다.";
+  const message = currentUser.role === "teacher" ? "보호자에게 납부 안내가 필요한 회차입니다." : "새로운 수업이 시작됩니다. 수업료 납부를 부탁드립니다.";
   return `
     <article class="tuition-cycle">
       <div class="tuition-cycle-main">
         <h3>${formatTuitionCycleLabel(cycle)} 수업료</h3>
-        <div class="item-meta"><span class="pill coral">납부 필요</span><span class="pill">${cycle.completedOn ? `${formatKoreanDate(cycle.completedOn)} ${cycle.toSession}회차 완료` : `${cycle.toSession}회차 완료`}</span></div>
+        <div class="item-meta"><span class="pill coral">납부 필요</span>${cycle.completedOn ? `<span class="pill">${formatKoreanDate(cycle.completedOn)} ${cycle.toSession}회차 완료</span>` : ""}</div>
       </div>
       <p class="item-text">${message}</p>
       ${currentUser.role === "teacher" ? `<button class="button primary" type="button" data-action="mark-tuition-paid" data-student-id="${cycle.studentId}" data-cycle-no="${cycle.cycleNo}">납부 확인</button>` : ""}
@@ -1053,7 +1053,7 @@ function renderStudentTuitionCard(student) {
       </div>
       <div class="surface-body">
         ${summary.cycles.length === 0
-          ? renderEmpty(`레슨 ${summary.nextCycleEnd}회 완료 후 첫 번째 수업료 알림이 생성됩니다.`)
+          ? renderEmpty("첫 수업을 기록하면 수업료 알림이 생성됩니다.")
           : `<div class="list">${summary.cycles.map(cycle => `
               <article class="item-card">
                 <div class="item-main">
@@ -1091,7 +1091,7 @@ function renderTuitionSummaryGuardian(currentUser, student) {
       </div>
       <div class="surface-body">
         ${summary.cycles.length === 0
-          ? renderEmpty(`레슨 ${summary.nextCycleEnd}회 완료 후 수업료 알림이 생성됩니다.`)
+          ? renderEmpty("첫 수업을 기록하면 수업료 알림이 생성됩니다.")
           : `<div class="list">${summary.cycles.map(cycle => `
               <article class="item-card">
                 <div class="item-main">
@@ -1773,18 +1773,20 @@ function getTuitionSummary(studentId) {
     if (sNo != null) sessionToLesson.set(sNo, lesson);
   }
   const maxSessionNo = Math.max(...sessionMap.values());
-  const completedCycleCount = Math.floor(maxSessionNo / LESSONS_PER_TUITION);
-  const cycles = Array.from({ length: completedCycleCount }, (_, i) => {
+  // 수업료는 새로운 사이클 시작 시 납부: 사이클 N은 (N-1)*4회차 완료 시 due
+  // → due 사이클 수 = Math.floor(maxSessionNo / 4) + 1
+  const totalDueCycles = Math.floor(maxSessionNo / LESSONS_PER_TUITION) + 1;
+  const cycles = Array.from({ length: totalDueCycles }, (_, i) => {
     const cycleNo = i + 1;
     const fromSession = i * LESSONS_PER_TUITION + 1;
     const toSession = cycleNo * LESSONS_PER_TUITION;
     const payment = payments.find(p => p.studentId === studentId && Number(p.cycleNo) === cycleNo);
     return { studentId, cycleNo, fromSession, toSession, completedOn: sessionToLesson.get(toSession)?.date || "", paid: Boolean(payment?.paid), paidAt: payment?.paidAt || "" };
   });
-  const remainingInCycle = maxSessionNo % LESSONS_PER_TUITION;
-  const nextDueIn = remainingInCycle === 0 ? LESSONS_PER_TUITION : LESSONS_PER_TUITION - remainingInCycle;
-  const nextCycleNo = completedCycleCount + 1;
-  return { lessonCount: maxSessionNo, cycles, unpaidCycles: cycles.filter(c => !c.paid), nextDueIn, nextCycleStart: (nextCycleNo - 1) * LESSONS_PER_TUITION + 1, nextCycleEnd: nextCycleNo * LESSONS_PER_TUITION };
+  // 다음 미래 수업료: totalDueCycles * 4회차가 끝날 때
+  const nextDueIn = totalDueCycles * LESSONS_PER_TUITION - maxSessionNo;
+  const nextCycleNo = totalDueCycles + 1;
+  return { lessonCount: maxSessionNo, cycles, unpaidCycles: cycles.filter(c => !c.paid), nextDueIn, nextCycleStart: totalDueCycles * LESSONS_PER_TUITION + 1, nextCycleEnd: nextCycleNo * LESSONS_PER_TUITION };
 }
 
 function getLessonSessionMap(studentId) {
