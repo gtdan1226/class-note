@@ -20,7 +20,9 @@ const NAV = [
   { view: "lessons", label: "레슨 일지", icon: "레" },
   { view: "weekly", label: "주간 회고", icon: "주" },
   { view: "students", label: "학생 관리", icon: "학", teacherOnly: true },
-  { view: "guardians", label: "보호자", icon: "보", teacherOnly: true }
+  { view: "guardians", label: "보호자", icon: "보", teacherOnly: true },
+  { view: "tuition", label: "수업료 관리", icon: "료", teacherOnly: true },
+  { view: "tuition-summary", label: "수업 요약", icon: "수", guardianOnly: true }
 ];
 
 // ── Supabase ──
@@ -158,7 +160,7 @@ async function loadGuardianState(profile) {
   const studentIds = (links || []).map(lk => lk.student_id);
   const matchedStudents = (links || []).map(lk => lk.students).filter(Boolean);
 
-  let goals = [], scheds = [], logs = [], lessons = [], assignments = [], reviews = [];
+  let goals = [], scheds = [], logs = [], lessons = [], assignments = [], reviews = [], tuitions = [];
   if (studentIds.length) {
     const r = await Promise.all([
       sb.from("goals").select("*").in("student_id", studentIds),
@@ -166,10 +168,11 @@ async function loadGuardianState(profile) {
       sb.from("practice_logs").select("*").in("student_id", studentIds),
       sb.from("lessons").select("*").in("student_id", studentIds),
       sb.from("assignments").select("*").in("student_id", studentIds),
-      sb.from("weekly_reviews").select("*").in("student_id", studentIds)
+      sb.from("weekly_reviews").select("*").in("student_id", studentIds),
+      sb.from("tuition_payments").select("*").in("student_id", studentIds)
     ]);
     goals = r[0].data || []; scheds = r[1].data || []; logs = r[2].data || [];
-    lessons = r[3].data || []; assignments = r[4].data || []; reviews = r[5].data || [];
+    lessons = r[3].data || []; assignments = r[4].data || []; reviews = r[5].data || []; tuitions = r[6].data || [];
   }
   state = {
     users: [
@@ -182,7 +185,7 @@ async function loadGuardianState(profile) {
     ],
     goals: mapGoals(goals), schedules: mapSchedules(scheds), practiceLogs: mapPracticeLogs(logs),
     lessons: mapLessons(lessons), assignments: mapAssignments(assignments),
-    tuitionPayments: [], weeklyReviews: mapWeeklyReviews(reviews)
+    tuitionPayments: mapTuitionPayments(tuitions), weeklyReviews: mapWeeklyReviews(reviews)
   };
   session = { userId: profile.id };
   if (studentIds.length) ui.selectedStudentId = studentIds[0];
@@ -271,7 +274,8 @@ function renderLogin() {
 
 function renderShell(currentUser) {
   const student = getSelectedStudent();
-  if (currentUser.role !== "teacher" && ["students", "guardians"].includes(ui.view)) ui.view = "dashboard";
+  if (currentUser.role !== "teacher" && ["students", "guardians", "tuition"].includes(ui.view)) ui.view = "dashboard";
+  if (currentUser.role !== "guardian" && ui.view === "tuition-summary") ui.view = "dashboard";
   if (currentUser.role === "guardian") ui.editingSlot = null;
 
   app.innerHTML = `
@@ -291,8 +295,11 @@ function renderShell(currentUser) {
           <div class="sidebar-inner">
             ${renderStudentSelectorArea(currentUser, student)}
             <nav class="nav" aria-label="주요 메뉴">
-              ${NAV.filter(item => !item.teacherOnly || currentUser.role === "teacher")
-                .map(item => `<button class="nav-button ${ui.view === item.view ? "active" : ""}" type="button" data-view="${item.view}"><span class="nav-icon">${item.icon}</span><span>${item.label}</span></button>`)
+              ${NAV.filter(item => {
+                  if (item.teacherOnly && currentUser.role !== "teacher") return false;
+                  if (item.guardianOnly && currentUser.role !== "guardian") return false;
+                  return true;
+                }).map(item => `<button class="nav-button ${ui.view === item.view ? "active" : ""}" type="button" data-view="${item.view}"><span class="nav-icon">${item.icon}</span><span>${item.label}</span></button>`)
                 .join("")}
             </nav>
           </div>
@@ -339,6 +346,8 @@ function renderCurrentView(currentUser, student) {
     case "weekly": return renderWeekly(currentUser, student);
     case "students": return renderStudents(currentUser);
     case "guardians": return renderGuardians(currentUser);
+    case "tuition": return renderTuitionManagement(currentUser);
+    case "tuition-summary": return renderTuitionSummaryGuardian(currentUser, student);
     case "dashboard": default: return renderDashboard(currentUser, student);
   }
 }
@@ -992,6 +1001,99 @@ function renderGuardianRow(guardian, students) {
       </td>
       <td data-label="관리"><button class="icon-button" type="button" data-action="delete-guardian" data-id="${guardian.id}" aria-label="보호자 삭제" title="보호자 삭제">×</button></td>
     </tr>
+  `;
+}
+
+function renderTuitionManagement(currentUser) {
+  const students = getStudents();
+  return `
+    <section class="page-head"><div><h1>수업료 관리</h1><p>학생별 레슨 사이클 수업료 현황을 관리합니다.</p></div></section>
+    ${students.length === 0
+      ? `<section class="surface"><div class="surface-body">${renderEmpty("등록된 학생이 없습니다.")}</div></section>`
+      : students.map(s => renderStudentTuitionCard(s)).join("")}
+  `;
+}
+
+function renderStudentTuitionCard(student) {
+  const summary = getTuitionSummary(student.id);
+  return `
+    <section class="surface">
+      <div class="surface-header">
+        <h2>${escapeHtml(student.name)}</h2>
+        <div class="item-meta">
+          <span class="pill blue">총 ${summary.lessonCount}회</span>
+          ${summary.unpaidCycles.length ? `<span class="pill coral">미납 ${summary.unpaidCycles.length}건</span>` : summary.cycles.length ? `<span class="pill green">전액 납부 완료</span>` : ""}
+        </div>
+      </div>
+      <div class="surface-body">
+        ${summary.cycles.length === 0
+          ? renderEmpty(`레슨 ${summary.nextCycleEnd}회 완료 후 첫 번째 수업료 알림이 생성됩니다.`)
+          : `<div class="list">${summary.cycles.map(cycle => `
+              <article class="item-card">
+                <div class="item-main">
+                  <h3 class="item-title">${formatTuitionCycleLabel(cycle)}</h3>
+                  <div class="item-meta">
+                    <span class="pill ${cycle.paid ? "green" : "coral"}">${cycle.paid ? "납부 완료" : "납부 필요"}</span>
+                    ${cycle.completedOn ? `<span class="pill">${formatKoreanDate(cycle.completedOn)} ${cycle.toSession}회차 완료</span>` : ""}
+                    ${cycle.paidAt ? `<span class="pill">납부일: ${formatKoreanDate(cycle.paidAt)}</span>` : ""}
+                  </div>
+                </div>
+                ${cycle.paid
+                  ? `<button class="button" type="button" data-action="mark-tuition-unpaid" data-student-id="${student.id}" data-cycle-no="${cycle.cycleNo}">납부 취소</button>`
+                  : `<button class="button primary" type="button" data-action="mark-tuition-paid" data-student-id="${student.id}" data-cycle-no="${cycle.cycleNo}">납부 확인</button>`}
+              </article>`).join("")}</div>`}
+        ${summary.lessonCount > 0 ? `<p class="item-text" style="margin-top:12px; color:var(--text-2);">다음 수업료까지 ${summary.nextDueIn}회 남음 (${summary.nextCycleStart}–${summary.nextCycleEnd}회차)</p>` : ""}
+      </div>
+    </section>
+  `;
+}
+
+function renderTuitionSummaryGuardian(currentUser, student) {
+  if (!student) return `<section class="page-head"><div><h1>수업 요약</h1><p>매칭된 학생이 없습니다.</p></div></section>`;
+  const summary = getTuitionSummary(student.id);
+  const lessons = state.lessons.filter(l => l.studentId === student.id).sort((a, b) => a.date.localeCompare(b.date));
+  const sessionMap = getLessonSessionMap(student.id);
+  return `
+    <section class="page-head"><div><h1>수업 요약</h1><p>${escapeHtml(student.name)} · 총 ${summary.lessonCount}회 레슨</p></div></section>
+
+    <section class="surface">
+      <div class="surface-header">
+        <h2>수업료 현황</h2>
+        <div class="item-meta">
+          ${summary.unpaidCycles.length ? `<span class="pill coral">미납 ${summary.unpaidCycles.length}건</span>` : summary.cycles.length ? `<span class="pill green">전액 납부 완료</span>` : `<span class="pill">사이클 없음</span>`}
+        </div>
+      </div>
+      <div class="surface-body">
+        ${summary.cycles.length === 0
+          ? renderEmpty(`레슨 ${summary.nextCycleEnd}회 완료 후 수업료 알림이 생성됩니다.`)
+          : `<div class="list">${summary.cycles.map(cycle => `
+              <article class="item-card">
+                <div class="item-main">
+                  <h3 class="item-title">${formatTuitionCycleLabel(cycle)} 수업료</h3>
+                  <div class="item-meta">
+                    <span class="pill ${cycle.paid ? "green" : "coral"}">${cycle.paid ? "납부 완료" : "납부 필요"}</span>
+                    ${cycle.completedOn ? `<span class="pill">${formatKoreanDate(cycle.completedOn)} ${cycle.toSession}회차 완료</span>` : ""}
+                    ${cycle.paidAt ? `<span class="pill">납부일: ${formatKoreanDate(cycle.paidAt)}</span>` : ""}
+                  </div>
+                </div>
+              </article>`).join("")}</div>`}
+        ${summary.lessonCount > 0 ? `<p class="item-text" style="margin-top:12px; color:var(--text-2);">다음 수업료까지 ${summary.nextDueIn}회 남음</p>` : ""}
+      </div>
+    </section>
+
+    <section class="surface">
+      <div class="surface-header"><h2>레슨 기록</h2><span class="pill">${lessons.length}회</span></div>
+      <div class="surface-body">
+        ${lessons.length === 0 ? renderEmpty("레슨 기록이 없습니다.") : `
+          <div class="list">${lessons.map(lesson => `
+            <article class="item-card">
+              <div class="item-main">
+                <h3 class="item-title">${sessionMap.get(lesson.id)}회차 · ${formatKoreanFullDate(lesson.date)}</h3>
+                ${lesson.content ? `<p class="item-text">${escapeHtml(lesson.content)}</p>` : ""}
+              </div>
+            </article>`).join("")}</div>`}
+      </div>
+    </section>
   `;
 }
 
