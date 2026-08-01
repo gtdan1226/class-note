@@ -264,24 +264,6 @@ function renderLogin() {
           </div>
           <button class="button primary" type="submit">로그인</button>
         </form>
-        <details style="margin-top: 24px;">
-          <summary style="cursor:pointer; color: var(--text-muted, #888);">선생님 최초 가입</summary>
-          <form class="login-form" data-form="register-teacher" style="margin-top: 16px;">
-            <div class="field">
-              <label for="regName">이름</label>
-              <input id="regName" name="name" required placeholder="예: 김도훈 선생님" />
-            </div>
-            <div class="field">
-              <label for="regUsername">계정</label>
-              <input id="regUsername" name="username" required autocomplete="off" />
-            </div>
-            <div class="field">
-              <label for="regPassword">비밀번호</label>
-              <input id="regPassword" name="password" type="password" required autocomplete="new-password" />
-            </div>
-            <button class="button primary" type="submit">가입</button>
-          </form>
-        </details>
       </section>
     </main>
   `;
@@ -1123,7 +1105,8 @@ async function handleSubmit(event) {
   if (type === "login") {
     const username = String(formData.get("username") || "").trim();
     const password = String(formData.get("password") || "");
-    const { data, error } = await sb.auth.signInWithPassword({ email: `${username}@classnote.app`, password });
+    const email = username.includes("@") ? username : `${username}@classnote.app`;
+    const { data, error } = await sb.auth.signInWithPassword({ email, password });
     if (error) { showToast("계정 또는 비밀번호를 확인해주세요."); return; }
     await loadStateFromSupabase(data.user);
     ui.view = "dashboard";
