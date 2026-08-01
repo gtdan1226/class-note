@@ -1327,9 +1327,9 @@ async function handleSubmit(event) {
       }).select().single();
       if (aRec) state.assignments.push(mapAssignments([aRec])[0]);
     }
-    const lessonCount = state.lessons.filter(l => l.studentId === student.id).length;
+    const summary = getTuitionSummary(student.id);
     render();
-    showToast(lessonCount > 0 && lessonCount % LESSONS_PER_TUITION === 0 ? "레슨 일지를 저장했습니다. 수업료 알림이 생성되었습니다." : "레슨 일지를 저장했습니다.");
+    showToast(summary.lessonCount > 0 && summary.lessonCount % LESSONS_PER_TUITION === 0 ? "레슨 일지를 저장했습니다. 수업료 알림이 생성되었습니다." : "레슨 일지를 저장했습니다.");
     return;
   }
 
@@ -1761,21 +1761,30 @@ function getStudentManagementSummary(student, today, weekStart) {
 }
 
 function getTuitionSummary(studentId) {
-  const lessons = state.lessons.filter(l => l.studentId === studentId).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
-  const lessonCount = lessons.length;
-  const completedCycleCount = Math.floor(lessonCount / LESSONS_PER_TUITION);
+  const lessons = state.lessons.filter(l => l.studentId === studentId);
   const payments = state.tuitionPayments || [];
+  if (lessons.length === 0) {
+    return { lessonCount: 0, cycles: [], unpaidCycles: [], nextDueIn: LESSONS_PER_TUITION, nextCycleStart: 1, nextCycleEnd: LESSONS_PER_TUITION };
+  }
+  const sessionMap = getLessonSessionMap(studentId);
+  const sessionToLesson = new Map();
+  for (const lesson of lessons) {
+    const sNo = sessionMap.get(lesson.id);
+    if (sNo != null) sessionToLesson.set(sNo, lesson);
+  }
+  const maxSessionNo = Math.max(...sessionMap.values());
+  const completedCycleCount = Math.floor(maxSessionNo / LESSONS_PER_TUITION);
   const cycles = Array.from({ length: completedCycleCount }, (_, i) => {
     const cycleNo = i + 1;
     const fromSession = i * LESSONS_PER_TUITION + 1;
     const toSession = cycleNo * LESSONS_PER_TUITION;
     const payment = payments.find(p => p.studentId === studentId && Number(p.cycleNo) === cycleNo);
-    return { studentId, cycleNo, fromSession, toSession, completedOn: lessons[toSession - 1]?.date || "", paid: Boolean(payment?.paid), paidAt: payment?.paidAt || "" };
+    return { studentId, cycleNo, fromSession, toSession, completedOn: sessionToLesson.get(toSession)?.date || "", paid: Boolean(payment?.paid), paidAt: payment?.paidAt || "" };
   });
-  const remainingInCycle = lessonCount % LESSONS_PER_TUITION;
-  const nextDueIn = LESSONS_PER_TUITION - remainingInCycle;
+  const remainingInCycle = maxSessionNo % LESSONS_PER_TUITION;
+  const nextDueIn = remainingInCycle === 0 ? LESSONS_PER_TUITION : LESSONS_PER_TUITION - remainingInCycle;
   const nextCycleNo = completedCycleCount + 1;
-  return { lessonCount, cycles, unpaidCycles: cycles.filter(c => !c.paid), nextDueIn, nextCycleStart: (nextCycleNo - 1) * LESSONS_PER_TUITION + 1, nextCycleEnd: nextCycleNo * LESSONS_PER_TUITION };
+  return { lessonCount: maxSessionNo, cycles, unpaidCycles: cycles.filter(c => !c.paid), nextDueIn, nextCycleStart: (nextCycleNo - 1) * LESSONS_PER_TUITION + 1, nextCycleEnd: nextCycleNo * LESSONS_PER_TUITION };
 }
 
 function getLessonSessionMap(studentId) {
