@@ -40,7 +40,7 @@ function intToDayKey(n) { return INT_TO_DAY[n] || "mon"; }
 // ── State ──
 let state = emptyState();
 let session = { userId: "" };
-let ui = { view: "dashboard", selectedStudentId: "", editingSlot: null };
+let ui = { view: "dashboard", selectedStudentId: "", editingSlot: null, editingLessonId: null };
 
 const app = document.querySelector("#app");
 
@@ -208,7 +208,8 @@ function mapPracticeLogs(rows) {
 function mapLessons(rows) {
   return rows.map(r => ({ id: r.id, studentId: r.student_id, date: r.lesson_on,
     content: r.content || "", assignment: r.assignment || "", assignmentDue: r.assignment_due || "",
-    feedback: r.feedback || "", studentMemo: r.student_memo || "" }));
+    feedback: r.feedback || "", studentMemo: r.student_memo || "",
+    sessionNo: r.session_no ?? null }));
 }
 function mapAssignments(rows) {
   return rows.map(r => ({ id: r.id, studentId: r.student_id, lessonId: r.lesson_id || "",
@@ -749,6 +750,7 @@ function renderTeacherLessonForm() {
   return `
     <form class="form-grid" data-form="add-lesson">
       <div class="field"><label for="lessonDate">날짜</label><input id="lessonDate" name="date" type="date" value="${toDateInputValue(new Date())}" required /></div>
+      <div class="field"><label for="lessonSessionNo">회차 (선택)</label><input id="lessonSessionNo" name="sessionNo" type="number" min="1" placeholder="자동 계산" /></div>
       <div class="field"><label for="assignmentDue">과제 마감</label><input id="assignmentDue" name="assignmentDue" type="date" /></div>
       <div class="field full"><label for="lessonContent">레슨 내용</label><textarea id="lessonContent" name="content" placeholder="오늘 다룬 내용"></textarea></div>
       <div class="field full"><label for="lessonAssignment">과제</label><textarea id="lessonAssignment" name="assignment" placeholder="다음 레슨까지 해올 과제"></textarea></div>
@@ -773,22 +775,46 @@ function renderStudentLessonMemoForm(studentId) {
 function renderLessonList(lessons, currentUser, sessionMap) {
   return `
     <div class="list">
-      ${lessons.map(lesson => `
+      ${lessons.map(lesson => {
+        const isEditing = currentUser.role === "teacher" && ui.editingLessonId === lesson.id;
+        const sessionNum = sessionMap.get(lesson.id);
+        return `
         <article class="item-card">
           <div class="item-top">
             <div>
-              <h3 class="item-title">${sessionMap.get(lesson.id)}회차 · ${formatKoreanFullDate(lesson.date)}</h3>
+              <h3 class="item-title">${sessionNum}회차 · ${formatKoreanFullDate(lesson.date)}</h3>
               <div class="item-meta" style="margin-top: 8px;">${lesson.assignmentDue ? `<span class="pill amber">과제 ${formatKoreanDate(lesson.assignmentDue)}</span>` : ""}</div>
             </div>
-            ${currentUser.role === "teacher" ? `<button class="icon-button" type="button" data-action="delete-lesson" data-id="${lesson.id}" aria-label="레슨 삭제" title="레슨 삭제">×</button>` : ""}
+            ${currentUser.role === "teacher" ? `
+              <div style="display:flex;gap:4px;">
+                ${isEditing
+                  ? `<button class="icon-button" type="button" data-action="cancel-edit-lesson" aria-label="편집 취소">✕</button>`
+                  : `<button class="icon-button" type="button" data-action="edit-lesson" data-id="${lesson.id}" aria-label="레슨 편집" title="레슨 편집">✎</button>`}
+                <button class="icon-button" type="button" data-action="delete-lesson" data-id="${lesson.id}" aria-label="레슨 삭제" title="레슨 삭제">×</button>
+              </div>
+            ` : ""}
           </div>
-          ${lesson.content ? `<p class="item-text"><strong>레슨 내용</strong><br />${escapeHtml(lesson.content)}</p>` : ""}
-          ${lesson.assignment ? `<p class="item-text"><strong>과제</strong><br />${escapeHtml(lesson.assignment)}</p>` : ""}
-          ${renderLessonAssignmentStatusBlock(lesson, currentUser)}
-          ${renderLessonFeedbackBlock(lesson, currentUser)}
-          ${lesson.studentMemo ? `<p class="item-text"><strong>학생 메모</strong><br />${escapeHtml(lesson.studentMemo)}</p>` : ""}
+          ${isEditing ? `
+            <form class="form-grid" data-form="save-edit-lesson" style="margin-top:12px;">
+              <input type="hidden" name="lessonId" value="${lesson.id}" />
+              <div class="field"><label>날짜</label><input name="date" type="date" value="${lesson.date}" required /></div>
+              <div class="field"><label>회차</label><input name="sessionNo" type="number" min="1" value="${lesson.sessionNo != null ? lesson.sessionNo : ""}" placeholder="자동 계산" /></div>
+              <div class="field"><label>과제 마감</label><input name="assignmentDue" type="date" value="${lesson.assignmentDue || ""}" /></div>
+              <div class="field full"><label>레슨 내용</label><textarea name="content">${escapeHtml(lesson.content)}</textarea></div>
+              <div class="field full"><label>과제</label><textarea name="assignment">${escapeHtml(lesson.assignment)}</textarea></div>
+              <div class="field full"><label>과제 피드백</label><textarea name="feedback">${escapeHtml(lesson.feedback)}</textarea></div>
+              <div class="field full"><button class="button primary" type="submit">저장</button></div>
+            </form>
+          ` : `
+            ${lesson.content ? `<p class="item-text"><strong>레슨 내용</strong><br />${escapeHtml(lesson.content)}</p>` : ""}
+            ${lesson.assignment ? `<p class="item-text"><strong>과제</strong><br />${escapeHtml(lesson.assignment)}</p>` : ""}
+            ${renderLessonAssignmentStatusBlock(lesson, currentUser)}
+            ${renderLessonFeedbackBlock(lesson, currentUser)}
+            ${lesson.studentMemo ? `<p class="item-text"><strong>학생 메모</strong><br />${escapeHtml(lesson.studentMemo)}</p>` : ""}
+          `}
         </article>
-      `).join("")}
+        `;
+      }).join("")}
     </div>
   `;
 }
@@ -1280,6 +1306,8 @@ async function handleSubmit(event) {
     const assignment = String(formData.get("assignment") || "").trim();
     const feedback = String(formData.get("feedback") || "").trim();
     const assignmentDue = String(formData.get("assignmentDue") || "");
+    const sessionNoRaw = formData.get("sessionNo");
+    const sessionNo = sessionNoRaw && String(sessionNoRaw).trim() !== "" ? Number(sessionNoRaw) : null;
     const { data: lesson, error } = await sb.from("lessons").insert({
       student_id: student.id,
       lesson_on: String(formData.get("date") || toDateInputValue(new Date())),
@@ -1287,7 +1315,8 @@ async function handleSubmit(event) {
       assignment: assignment || null,
       assignment_due: assignmentDue || null,
       feedback: feedback || null,
-      student_memo: null
+      student_memo: null,
+      session_no: sessionNo
     }).select().single();
     if (error) return;
     state.lessons.push(mapLessons([lesson])[0]);
@@ -1302,6 +1331,33 @@ async function handleSubmit(event) {
     render();
     showToast(lessonCount > 0 && lessonCount % LESSONS_PER_TUITION === 0 ? "레슨 일지를 저장했습니다. 수업료 알림이 생성되었습니다." : "레슨 일지를 저장했습니다.");
     return;
+  }
+
+  if (type === "save-edit-lesson" && currentUser.role === "teacher") {
+    const lessonId = String(formData.get("lessonId") || "");
+    const date = String(formData.get("date") || "").trim();
+    const content = String(formData.get("content") || "").trim();
+    const assignment = String(formData.get("assignment") || "").trim();
+    const assignmentDue = String(formData.get("assignmentDue") || "").trim();
+    const feedback = String(formData.get("feedback") || "").trim();
+    const sessionNoRaw = formData.get("sessionNo");
+    const sessionNo = sessionNoRaw && String(sessionNoRaw).trim() !== "" ? Number(sessionNoRaw) : null;
+    const updates = {
+      lesson_on: date,
+      content: content || null,
+      assignment: assignment || null,
+      assignment_due: assignmentDue || null,
+      feedback: feedback || null,
+      session_no: sessionNo
+    };
+    const { error } = await sb.from("lessons").update(updates).eq("id", lessonId);
+    if (error) { showToast("저장 중 오류가 발생했습니다."); return; }
+    const idx = state.lessons.findIndex(l => l.id === lessonId);
+    if (idx !== -1) {
+      state.lessons[idx] = { ...state.lessons[idx], date, content: content || "", assignment: assignment || "", assignmentDue: assignmentDue || "", feedback: feedback || "", sessionNo };
+    }
+    ui.editingLessonId = null;
+    render(); showToast("레슨 일지를 수정했습니다."); return;
   }
 
   if (type === "save-lesson-feedback") {
@@ -1444,7 +1500,7 @@ async function handleClick(event) {
   if (action === "logout") {
     await sb.auth.signOut();
     state = emptyState(); session = { userId: "" };
-    ui = { view: "dashboard", selectedStudentId: "", editingSlot: null };
+    ui = { view: "dashboard", selectedStudentId: "", editingSlot: null, editingLessonId: null };
     render(); return;
   }
 
@@ -1487,6 +1543,16 @@ async function handleClick(event) {
     await sb.from("practice_logs").delete().eq("id", logId);
     state.practiceLogs = state.practiceLogs.filter(l => l.id !== logId);
     render(); showToast("연습 기록을 삭제했습니다."); return;
+  }
+
+  if (action === "edit-lesson" && currentUser.role === "teacher") {
+    ui.editingLessonId = actionButton.dataset.id;
+    render(); return;
+  }
+
+  if (action === "cancel-edit-lesson") {
+    ui.editingLessonId = null;
+    render(); return;
   }
 
   if (action === "delete-lesson" && currentUser.role === "teacher") {
@@ -1713,7 +1779,8 @@ function getTuitionSummary(studentId) {
 }
 
 function getLessonSessionMap(studentId) {
-  return new Map(state.lessons.filter(l => l.studentId === studentId).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id)).map((l, i) => [l.id, i + 1]));
+  const sorted = state.lessons.filter(l => l.studentId === studentId).sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
+  return new Map(sorted.map((l, i) => [l.id, l.sessionNo != null ? l.sessionNo : i + 1]));
 }
 function findScheduleSlot(studentId, day, hour) { return state.schedules.find(s => s.studentId === studentId && s.day === day && s.hour === hour); }
 function getRoleLabel(role) { return ROLE_LABELS[role] || "사용자"; }
@@ -1724,7 +1791,7 @@ function canViewTuitionNotice(user, student) {
   return user.role === "student" && user.id === student.id && Boolean(student.selfPayer);
 }
 function isRecordMutationAction(action) {
-  return ["edit-slot","delete-slot","clear-schedule-done","delete-goal","delete-practice","delete-lesson","mark-tuition-paid","mark-tuition-unpaid","toggle-goal","toggle-practice-achieved","toggle-assignment","toggle-self-payer","update-goal-progress"].includes(action);
+  return ["edit-slot","delete-slot","clear-schedule-done","delete-goal","delete-practice","delete-lesson","edit-lesson","cancel-edit-lesson","mark-tuition-paid","mark-tuition-unpaid","toggle-goal","toggle-practice-achieved","toggle-assignment","toggle-self-payer","update-goal-progress"].includes(action);
 }
 function getMatchedStudentIds(formData) { return formData.getAll("studentIds").map(v => String(v || "").trim()).filter(Boolean); }
 function clamp(v, min, max) { return Math.min(Math.max(v, min), max); }
