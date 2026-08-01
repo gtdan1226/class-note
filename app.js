@@ -22,7 +22,8 @@ const NAV = [
   { view: "students", label: "학생 관리", icon: "학", teacherOnly: true },
   { view: "guardians", label: "보호자", icon: "보", teacherOnly: true },
   { view: "tuition", label: "수업료 관리", icon: "료", teacherOnly: true },
-  { view: "tuition-summary", label: "수업 요약", icon: "수", guardianOnly: true }
+  { view: "tuition-summary", label: "수업 요약", icon: "수", guardianOnly: true },
+  { view: "account", label: "내 계정", icon: "계" }
 ];
 
 // ── Supabase ──
@@ -336,6 +337,7 @@ function renderStudentBadge(student) {
 }
 
 function renderCurrentView(currentUser, student) {
+  if (ui.view === "account") return renderAccountSettings(currentUser);
   if (!student && !["students", "guardians"].includes(ui.view)) {
     return `<section class="page-head"><div><h1>학생이 없습니다</h1><p>${currentUser.role === "guardian" ? "매칭된 학생이 없습니다." : "학생 관리에서 계정을 먼저 추가하세요."}</p></div></section>`;
   }
@@ -1123,6 +1125,30 @@ function renderTuitionSummaryGuardian(currentUser, student) {
   `;
 }
 
+function renderAccountSettings(currentUser) {
+  return `
+    <section class="page-head">
+      <div><h1>내 계정</h1><p>${escapeHtml(currentUser.name)} · ${getRoleLabel(currentUser.role)}</p></div>
+    </section>
+    <section class="surface">
+      <div class="surface-header"><h2>비밀번호 변경</h2></div>
+      <div class="surface-body">
+        <form class="form-grid one" data-form="change-own-password">
+          <div class="field">
+            <label for="newPw">새 비밀번호</label>
+            <input id="newPw" name="newPassword" type="password" minlength="6" required autocomplete="new-password" placeholder="6자 이상" />
+          </div>
+          <div class="field">
+            <label for="confirmPw">비밀번호 확인</label>
+            <input id="confirmPw" name="confirmPassword" type="password" minlength="6" required autocomplete="new-password" placeholder="다시 입력" />
+          </div>
+          <button class="button primary" type="submit">변경</button>
+        </form>
+      </div>
+    </section>
+  `;
+}
+
 function renderStudentMatchChecks(students, selectedIds) {
   if (!students.length) return renderEmpty("학생 계정이 없습니다.");
   return `<div class="match-list">${students.map(s => `<label class="checkline match-check"><input type="checkbox" name="studentIds" value="${s.id}" ${selectedIds.includes(s.id) ? "checked" : ""} /><span>${escapeHtml(s.name)} · ${escapeHtml(s.instrument || "전공 미정")}</span></label>`).join("")}</div>`;
@@ -1239,6 +1265,18 @@ async function handleSubmit(event) {
     await loadStateFromSupabase(data.user);
     ui.view = "dashboard";
     render();
+    return;
+  }
+
+  if (type === "change-own-password") {
+    const newPw = String(formData.get("newPassword") || "").trim();
+    const confirmPw = String(formData.get("confirmPassword") || "").trim();
+    if (newPw.length < 6) { showToast("비밀번호는 6자 이상이어야 합니다."); return; }
+    if (newPw !== confirmPw) { showToast("비밀번호가 일치하지 않습니다."); return; }
+    const { error } = await sb.auth.updateUser({ password: newPw });
+    if (error) { showToast("비밀번호 변경에 실패했습니다."); return; }
+    showToast("비밀번호를 변경했습니다.");
+    event.target.reset();
     return;
   }
 
