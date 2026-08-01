@@ -71,7 +71,7 @@ async function loadStateFromSupabase(authUser) {
 
 async function loadTeacherState(profile) {
   const [studentsRes, linksRes] = await Promise.all([
-    sb.from("students").select("*, profiles(id, username)").eq("teacher_id", profile.id),
+    sb.from("students").select("*, profiles!students_profile_id_fkey(id, username)").eq("teacher_id", profile.id),
     sb.from("guardian_students").select("*, profiles!guardian_id(id, full_name, username, role)").eq("teacher_id", profile.id)
   ]);
   const students = studentsRes.data || [];
