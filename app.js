@@ -27,9 +27,9 @@ const NAV = [
 ];
 
 // ── Supabase ──
-const SUPABASE_URL = "https://twnnjvuyokjkyqbqkhqi.supabase.co";
-const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR3bm5qdnV5b2tqa3lxYnFraHFpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU0MjMwNDIsImV4cCI6MjEwMDk5OTA0Mn0.YvKGDLXjKDnjLw1IuWIvqp7dyi_ikBcwlOh36fhccmE";
-const FUNCTIONS_URL = "https://twnnjvuyokjkyqbqkhqi.supabase.co/functions/v1/manage-users";
+const SUPABASE_URL = "https://voprlnfyexrbgjnrxark.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZvcHJsbmZ5ZXhyYmdqbnJ4YXJrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYyNjMyNDMsImV4cCI6MjEwMTgzOTI0M30.llxtMweXOvOlxlLEYe7gXxbfRqWU0tm8I8S_H7BSXgw";
+const FUNCTIONS_URL = "https://voprlnfyexrbgjnrxark.supabase.co/functions/v1/manage-users";
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ── Day key ↔ int ──
